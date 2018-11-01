@@ -5,7 +5,7 @@
 
 import sys, os
 import sqlite3
-from apiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload
 
 from abstract_client import CACHE_FOLDERIDS
 from abstract_client import MAX_ACT_LEN, MAX_KEY_LEN, MAX_PATH_LEN
@@ -51,6 +51,8 @@ class DAClient(AbstractClient):
     npt = ''
     while not npt is None:
       if npt != '': kwargs['pageToken'] = npt
+      kwargs['supportsTeamDrives'] = True
+      kwargs['includeTeamDriveItems'] = True
       e = self.service.files().list(q=q, **kwargs).execute()
       if result is None: result = e
       else: result['items'] += e['items']
@@ -154,7 +156,8 @@ insert into folderIds (key, val) values ('root', '/');''')
     '''
     body = {'title': name, 'mimeType': FOLDER_TYPE, 'description': name}
     body['parents'] = [{'id': parentId}]
-    folder = self.service.files().insert(body=body).execute()
+    folder = self.service.files().insert(body=body, supportsTeamDrives=True).execute()
+    print ">> Directory created\n"
     return (folder['id'], folder)
 
   def uploadFile(self, path, filename, parentId, fileId=None):
@@ -167,36 +170,46 @@ insert into folderIds (key, val) values ('root', '/');''')
     if mbody._mimetype is None: mbody._mimetype = 'application/octet-stream'
     if fileId is None:
       fileObj = self.service.files().insert(
-        body=body, media_body=mbody).execute()
+        body=body, media_body=mbody, supportsTeamDrives=True).execute()
     else:
       fileObj = self.service.files().update(
-        fileId=fileId, body=body, media_body=mbody).execute()
+        fileId=fileId, body=body, media_body=mbody, supportsTeamDrives=True).execute()
+    print ">> Uploaded %s" % filename
     return (fileObj['id'], fileObj)
 
-  def prepare_folder(self, folder):
+  def raise_if_folder_ignored(self, folder, root='root'):
     q = folder.replace('\\', '/')
     if len(q) > MAX_PATH_LEN:
       raise Exception('folder length is too long > %s' % MAX_PATH_LEN)
     if q[0] != '/':
       raise Exception('folder does not start with / [%s]' % folder)
-    if q[-1] == '/' or not len(q): # root or endswith '/'
-      return ('root', '/')
+    if q[-1] == '/' or not len(q):  # root or endswith '/'
+      return (root, '/')
+    if os.path.exists(os.path.join(q, 'NO_UPLOAD')):
+      raise Exception('folder %s is marked as NO_UPLOAD' % q)
+    if os.path.split(folder)[-1] == '@eaDir':
+      raise Exception('not uploading @eaDir')
+
+  def prepare_folder(self, folder, root='root'):
+    q = folder.replace('\\', '/')
+    self.raise_if_folder_ignored(folder, root)
     cn = sqlite3.connect(self.folderIds)
     cn.row_factory = sqlite3.Row
     cur = cn.cursor()
     cur.execute('''\
 select key from folderIds where val=? and act=? and fol=? and flg=?;''', (
-      q, 1, 1, 0))
+      q.decode('utf-8'), 1, 1, 0))
     row = cur.fetchone()
     cur.close()
     cn.close()
     if row is None:
       parent, p = os.path.split(q)
-      parentId, r = self.prepare_folder(parent)
+      parentId, r = self.prepare_folder(parent, root=root)
       query = "'%s' in parents and title='%s' and mimeType='%s' %s" % (
-        parentId, p, FOLDER_TYPE, 'and explicitlyTrashed=False')
+        parentId, p.decode('utf-8'), FOLDER_TYPE, 'and explicitlyTrashed=False')
       entries = self.execQuery(query, True, True, **{'maxResults': 2})
       if not len(entries['items']):
+        print ">> Creating new directory %s\n" % q
         folderId, folderObj = self.createFolder(p, parentId)
       else:
         folderId = entries['items'][0]['id']
@@ -205,7 +218,7 @@ select key from folderIds where val=? and act=? and fol=? and flg=?;''', (
       cn = sqlite3.connect(self.folderIds)
       cn.execute('''\
 insert into folderIds (key, val, act, fol, flg) values (?, ?, ?, ?, ?);''', (
-        folderId, q, 1, 1, 0))
+        folderId, q.decode('utf-8'), 1, 1, 0))
       cn.commit()
       cn.close()
     else:
@@ -218,43 +231,69 @@ insert into folderIds (key, val, act, fol, flg) values (?, ?, ?, ?, ?);''', (
     cur = cn.cursor()
     cur.execute('''\
 select key from folderIds where val=? and act=? and fol=? and flg=?;''', (
-      '%s/%s' % (parent, filename), 1, 0, 0))
+      u'%s/%s' % (parent.decode('utf-8'), filename.decode('utf-8')), 1, 0, 0))
     row = cur.fetchone()
     cur.close()
     cn.close()
     if row is None:
-      query = "'%s' in parents and title='%s' and mimeType!='%s' %s" % (
-        parentId, filename, FOLDER_TYPE, 'and explicitlyTrashed=False')
+      query = u"'%s' in parents and title='%s' and mimeType!='%s' %s" % (
+        parentId, filename.decode('utf-8'), FOLDER_TYPE, 'and explicitlyTrashed=False')
       entries = self.execQuery(query, True, True, **{'maxResults': 2})
       if not len(entries['items']):
+        print ">> Uploading new file %s %s" % (parent, filename)
         fileId, fileObj = self.uploadFile(path, filename, parentId)
       else:
+        print ">> Updating file %s %s" % (parent, filename)
         fileId = entries['items'][0]['id']
         if len(entries['items']) > 1:
-          sys.stderr.write('duplicated file [%s/%s]\a\n' % (parent, filename))
+          sys.stderr.write('EE duplicated file [%s/%s]\a\n' % (parent, filename))
         fileId, fileObj = self.uploadFile(path, filename, parentId, fileId)
       cn = sqlite3.connect(self.folderIds)
       cn.execute('''\
 insert into folderIds (key, val, act, fol, flg) values (?, ?, ?, ?, ?);''', (
-        fileId, '%s/%s' % (parent, filename), 1, 0, 0))
+        fileId, u'%s/%s' % (parent.decode('utf-8'), filename.decode('utf-8')), 1, 0, 0))
       cn.commit()
       cn.close()
     else:
-      fileId, fileObj = self.uploadFile(path, filename, parentId, row['key'])
+      # print "file already uploaded: %s" % filename
+      fileId = row[0]
+      fileObj = None
+      #fileId, fileObj = self.uploadFile(path, filename, parentId, row['key'])
     return (fileId, fileObj)
 
-  def recursiveUpload(self, remote):
+  def recursiveUpload(self, remote, team_drive_id=None):
+
     basedir = self.basedir
     b = os.path.join(basedir, remote)
-    remote_id, q = self.prepare_folder(b[len(basedir):]) # set [0]='/'
-    for path, dirs, files in os.walk(b):
-      p_id, q = self.prepare_folder(path[len(basedir):]) # set [0]='/'
-      for d in dirs:
-        print 'D %s %s' % (q, d) # os.path.join(path, d)
-      for f in files:
-        print 'F %s %s' % (q, f) # os.path.join(path, f)
-        fileId, fileObj = self.process_file(path, f, p_id, q)
-        # pprint.pprint((fileId, fileObj))
+    root = 'root' if team_drive_id is None else team_drive_id
+    remote_id, q = self.prepare_folder(b[len(basedir):], root=root) # set [0]='/'
+    print ">> Processing dir %s" % q
+
+    for path, dirs, files in os.walk(b, topdown=True):
+      try:
+        p_id, q = self.prepare_folder(path[len(basedir):], root=root) # set [0]='/'
+        print ">> Processing dir %s" % q
+
+        dirs_to_exclude = set()
+        for d in dirs:
+          try:
+            self.raise_if_folder_ignored(os.path.join(path, d))
+            print '>> Adding subdir %s/%s' % (q, d)  # os.path.join(path, d)
+          except Exception, e:
+            print ">> Subdir %s/%s is ignored because: %s" % (q, d, str(e))
+            dirs_to_exclude.add(d)
+        dirs[:] = set(dirs) - dirs_to_exclude
+        for f in files:
+          # print 'F %s %s' % (q, f) # os.path.join(path, f)
+          sys.stdout.write('.')
+          try:
+            fileId, fileObj = self.process_file(path, f, p_id, q)
+            # pprint.pprint((fileId, fileObj))
+          except Exception as ex2:
+            print str(ex2)
+        sys.stdout.write("\n")
+      except Exception as ex:
+        print str(ex)
 
   def downloadFile(self, path, filename, parentId, fileId=None, mimetype=None):
     '''

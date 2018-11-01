@@ -6,15 +6,14 @@ https://code.google.com/p/gdata-python-client/source/browse/src/gdata/spreadshee
 gdata.spreadsheet.text_db.DatabaseClient has no auth_token parameter
 https://code.google.com/p/gdata-python-client/source/browse/src/gdata/spreadsheet/text_db.py
 '''
-
 import sys, os
 import httplib2
-from apiclient.http import MediaInMemoryUpload
-from gdata.spreadsheets.client import SpreadsheetsClient
+from googleapiclient.http import MediaInMemoryUpload
+#from gdata.spreadsheets.client import SpreadsheetsClient
 from oauth2client_gdata_bridge import OAuth2BearerToken
 from oauth2client.client import AccessTokenRefreshError
-from oauth2client.anyjson import simplejson
-# import simplejson
+#from oauth2client.anyjson import simplejson
+import simplejson
 
 from abstract_client import SPREADSHEET_TYPE
 from da_client import DAClient
@@ -23,7 +22,7 @@ class SpreadsheetFactory(DAClient):
   def __init__(self, basedir=None, **kwargs):
     super(SpreadsheetFactory, self).__init__(basedir, **kwargs)
     self.bearerToken = OAuth2BearerToken(self.credentials)
-    self.ssc = SpreadsheetsClient(auth_token=self.bearerToken)
+    self.ssc = None  # SpreadsheetsClient(auth_token=self.bearerToken)
 
   def __call__(self, **kwargs):
     '''
@@ -107,7 +106,13 @@ class SpreadsheetFactory(DAClient):
       'description': description if description else sheetName}
     if parentId is None: parentId = 'root'
     body['parents'] = [{'id': parentId}]
-    mbody = MediaInMemoryUpload(csv if csv else '\n'.join([',' * cols] * rows),
+    line = [',' * cols]
+    if csv:
+      lines = csv.splitlines()
+      dat = lines + (line * (rows - len(lines)))
+    else:
+      dat = line * rows
+    mbody = MediaInMemoryUpload('\n'.join(dat),
       mimetype='text/csv', chunksize=256*1024, resumable=False)
     req = self.service.files().insert(body=body, media_body=mbody)
     req.uri += '&convert=true'

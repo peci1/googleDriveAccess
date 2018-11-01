@@ -13,15 +13,16 @@ import googleDriveAccess as gda
 import logging
 logging.basicConfig()
 
-BACKUP = 'recursive_upload_backup'
+BACKUP = 'GeminiData'
 
 def main(basedir):
   da = gda.DAClient(basedir)
-  da.recursiveUpload(BACKUP)
-
+  da.recursiveUpload(BACKUP, team_drive_id='0ALRQhuiUH2nmUk9PVA')
+  # da.recursiveUpload(BACKUP)
+  
 if __name__ == '__main__':
   logging.getLogger().setLevel(getattr(logging, 'INFO')) # ERROR
   try:
-    main(os.path.dirname(__file__))
+    main('/volume1')
   except (socket.gaierror, ), e:
     sys.stderr.write('socket.gaierror')

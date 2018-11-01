@@ -8,10 +8,11 @@ import getpass
 from StringIO import StringIO
 import bz2
 import httplib2
-from apiclient.discovery import build
+from googleapiclient.discovery import build
 from oauth2client.client import OAuth2WebServerFlow, OAuth2Credentials
-from oauth2client.anyjson import simplejson
-# import simplejson
+#from oauth2client.anyjson import simplejson
+
+import simplejson
 
 from buf_AES_256_CBC import buf_AES_256_CBC_decrypt, buf_AES_256_CBC_encrypt
 from . import OAUTH_SCOPE
@@ -134,7 +135,7 @@ class AbstractClient(object):
         self.srv_name, self.srv_version))
 
   def safe_fname(self, fn):
-    return fn.replace('@', '.')
+    return fn.replace('@', '.')[:80]
 
   def get_fcred(self, default=False):
     return os.path.join(self.basedir, CREDENTIAL_FILE % (self.clientId,
@@ -157,12 +158,15 @@ class AbstractClient(object):
           '2: dispose and create new credential for %s' % self.oa2act))
         if n == '2': break
       else:
-        self.oa2act = credentials.token_response['id_token']['email']
+        #self.oa2act = credentials.token_response['id_token']['email']
+        self.oa2act = credentials.token_response['id_token']
         break
     return credentials
 
   def store_credentials(self, credentials):
-    self.oa2act = credentials.token_response['id_token']['email']
+    print(credentials.token_response)
+    #self.oa2act = credentials.token_response['id_token']['email']
+    self.oa2act = credentials.token_response['id_token']
     print 'OAuth2 success. Enter password to store credential for %s CI=%s' % (
       self.oa2act, self.clientId)
     pid = getpass2()
@@ -179,14 +183,17 @@ class AbstractClient(object):
       try:
         d = readJsonClient(self.basedir, pid, self.clientId)
         cli = simplejson.loads(d)['installed']
+        #cli = simplejson.loads(d)
       except (Exception, ), e:
         cli = None
+        print str(e)
       if cli is None: print 'password may be incorrect.'
       else: break
     # pprint.pprint(cli)
     scope = ' '.join(OAUTH_SCOPE[(1 if not self.script else 0):])
     flow = OAuth2WebServerFlow(cli['client_id'], cli['client_secret'],
       scope, redirect_uri=cli['redirect_uris'][0])
+      # scope, redirect_uri=cli['auth_uri'])
     authorize_url = flow.step1_get_authorize_url()
     print 'Go to the following link in your browser: %s' % authorize_url
     code = raw_input('Enter verification code: ').strip()

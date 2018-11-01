@@ -5,9 +5,9 @@
 
 import sys, os
 import logging
-from apiclient.http import MediaFileUpload
-from oauth2client.anyjson import simplejson
-# import simplejson
+from googleapiclient.http import MediaFileUpload
+#from oauth2client.anyjson import simplejson
+import simplejson
 
 from abstract_client import MANIFEST, SCRIPT_TYPE
 from da_client import DAClient

@@ -6,8 +6,8 @@
 import sys, os
 import urllib
 import httplib2
-from oauth2client.anyjson import simplejson
-# import simplejson
+#from oauth2client.anyjson import simplejson
+import simplejson
 
 class GeocodingClient(object):
   GEOCODING_URI = 'http://maps.google.com/maps/api/geocode/json?'

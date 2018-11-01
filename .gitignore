@@ -4,3 +4,6 @@
 *.pyc
 MANIFEST
 cache_folderIds_*.sl3
+client_secret_*
+credentials_*
+hierarchy_*
